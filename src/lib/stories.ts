@@ -185,26 +185,41 @@ export async function uploadStoryMedia(file: File): Promise<string | null> {
   }
 
   const fileExt = file.name.split('.').pop()
-  const fileName = `${user.id}-${Date.now()}.${fileExt}`
-  const filePath = `${user.id}/${fileName}`
+  const fileName = `story-${user.id}-${Date.now()}.${fileExt}`
 
-  // Upload to the 'avatars' bucket since 'stories' bucket might not exist
-  // You can create a 'stories' bucket in Supabase Storage if you want
-  const { error: uploadError, data: uploadData } = await supabase.storage
+  // Upload to the 'avatars' bucket
+  const { error: uploadError } = await supabase.storage
     .from('avatars')
-    .upload(filePath, file, {
+    .upload(fileName, file, {
       cacheControl: '3600',
-      upsert: false
+      upsert: true
     })
 
   if (uploadError) {
     console.error('Error uploading story media:', uploadError)
-    return null
+    // Try alternative approach
+    const { error: retryError } = await supabase.storage
+      .from('avatars')
+      .upload(`stories/${fileName}`, file, {
+        cacheControl: '3600',
+        upsert: true
+      })
+    
+    if (retryError) {
+      console.error('Retry upload also failed:', retryError)
+      return null
+    }
+    
+    const { data } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(`stories/${fileName}`)
+    
+    return data.publicUrl
   }
 
   const { data } = supabase.storage
     .from('avatars')
-    .getPublicUrl(filePath)
+    .getPublicUrl(fileName)
 
   console.log('Story uploaded successfully:', data.publicUrl)
   return data.publicUrl

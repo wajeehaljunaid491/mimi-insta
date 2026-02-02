@@ -44,14 +44,27 @@ export default function Stories() {
 
     setUploading(true)
     try {
+      console.log('Starting story upload...')
       const mediaUrl = await uploadStoryMedia(file)
+      console.log('Media URL:', mediaUrl)
+      
       if (mediaUrl) {
         const mediaType = file.type.startsWith('video') ? 'video' : 'image'
-        await createStory(mediaUrl, mediaType)
-        await loadStories()
+        console.log('Creating story with type:', mediaType)
+        const story = await createStory(mediaUrl, mediaType)
+        console.log('Story created:', story)
+        
+        if (story) {
+          await loadStories()
+        } else {
+          alert('Failed to create story. Please try again.')
+        }
+      } else {
+        alert('Failed to upload image. Please check your connection.')
       }
     } catch (err) {
       console.error('Error uploading story:', err)
+      alert('Error uploading story. Please try again.')
     }
     setUploading(false)
     if (fileInputRef.current) fileInputRef.current.value = ''

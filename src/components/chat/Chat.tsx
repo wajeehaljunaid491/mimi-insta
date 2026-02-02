@@ -50,6 +50,8 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
   const [chatSearchQuery, setChatSearchQuery] = useState('')
   const [showChatSearch, setShowChatSearch] = useState(false)
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
+  const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set())
+  const [isSelectMode, setIsSelectMode] = useState(false)
   const [showChatOptions, setShowChatOptions] = useState(false)
   const [callingUser, setCallingUser] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -530,6 +532,43 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
     setSelectedMessageId(null)
   }
 
+  // Toggle message selection for multi-select
+  const toggleMessageSelection = (messageId: string) => {
+    setSelectedMessages(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId)
+      } else {
+        newSet.add(messageId)
+      }
+      return newSet
+    })
+  }
+
+  // Delete multiple selected messages
+  const handleDeleteSelectedMessages = async (forEveryone: boolean) => {
+    if (selectedMessages.size === 0) return
+    
+    const messageIds = Array.from(selectedMessages)
+    let successCount = 0
+    
+    for (const messageId of messageIds) {
+      const success = await deleteMessage(messageId, forEveryone)
+      if (success) successCount++
+    }
+
+    if (forEveryone) {
+      setMessages(prev => prev.map(m => 
+        selectedMessages.has(m.id) ? { ...m, content: 'This message was deleted', deleted_for_everyone: true } : m
+      ))
+    } else {
+      setMessages(prev => prev.filter(m => !selectedMessages.has(m.id)))
+    }
+
+    setSelectedMessages(new Set())
+    setIsSelectMode(false)
+  }
+
   // Handle delete chat
   const handleDeleteChat = async () => {
     if (!activeChat || !confirm('Delete this entire conversation?')) return
@@ -635,8 +674,20 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
             {showChatOptions && (
               <div className="absolute right-0 top-full mt-1 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden">
                 <button
+                  onClick={() => {
+                    setIsSelectMode(true)
+                    setShowChatOptions(false)
+                  }}
+                  className="w-full px-4 py-3 text-left text-gray-300 hover:bg-slate-700/50 flex items-center gap-3 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                  </svg>
+                  Select Messages
+                </button>
+                <button
                   onClick={handleDeleteChat}
-                  className="w-full px-4 py-3 text-left text-red-400 hover:bg-slate-700/50 flex items-center gap-3 transition-colors"
+                  className="w-full px-4 py-3 text-left text-red-400 hover:bg-slate-700/50 flex items-center gap-3 transition-colors border-t border-slate-700"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -681,6 +732,44 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
             )}
           </div>
         )}
+
+        {/* Select Mode Bar */}
+        {isSelectMode && (
+          <div className="px-3 pb-3 flex items-center justify-between bg-slate-800/80">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setIsSelectMode(false)
+                  setSelectedMessages(new Set())
+                }}
+                className="p-1.5 hover:bg-slate-700 rounded-lg transition-colors text-gray-400"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <span className="text-sm text-gray-300">
+                {selectedMessages.size} selected
+              </span>
+            </div>
+            {selectedMessages.size > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDeleteSelectedMessages(false)}
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-gray-300 transition-colors"
+                >
+                  Delete for me
+                </button>
+                <button
+                  onClick={() => handleDeleteSelectedMessages(true)}
+                  className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 rounded-lg text-sm text-red-400 transition-colors"
+                >
+                  Delete for everyone
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Messages */}
@@ -709,19 +798,43 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
             const isVoice = msg.message_type === 'audio'
             const isDeleted = (msg as any).deleted_for_everyone
             const isSelected = selectedMessageId === msg.id
+            const isChecked = selectedMessages.has(msg.id)
             
             return (
               <div
                 key={msg.id}
-                className={`flex ${isMine ? 'justify-end' : 'justify-start'} relative group`}
+                className={`flex ${isMine ? 'justify-end' : 'justify-start'} relative group items-center gap-2`}
               >
+                {/* Checkbox for select mode */}
+                {isSelectMode && (
+                  <button
+                    onClick={() => toggleMessageSelection(msg.id)}
+                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                      isChecked 
+                        ? 'bg-cyan-500 border-cyan-500' 
+                        : 'border-gray-500 hover:border-cyan-400'
+                    }`}
+                  >
+                    {isChecked && (
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                )}
                 <div
-                  onClick={() => setSelectedMessageId(isSelected ? null : msg.id)}
+                  onClick={() => {
+                    if (isSelectMode) {
+                      toggleMessageSelection(msg.id)
+                    } else {
+                      setSelectedMessageId(isSelected ? null : msg.id)
+                    }
+                  }}
                   className={`max-w-[75%] px-4 py-2.5 rounded-2xl cursor-pointer transition-all ${
                     isMine
                       ? 'bg-gradient-to-r from-cyan-600 to-teal-600 text-white rounded-br-md'
                       : 'bg-slate-700 text-white rounded-bl-md'
-                  } ${isSelected ? 'ring-2 ring-cyan-400' : ''}`}
+                  } ${isSelected && !isSelectMode ? 'ring-2 ring-cyan-400' : ''} ${isChecked ? 'ring-2 ring-cyan-500' : ''}`}
                 >
                   {isDeleted ? (
                     <p className="text-sm italic opacity-60">This message was deleted</p>

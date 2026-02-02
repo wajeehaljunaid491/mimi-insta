@@ -22,7 +22,12 @@ export async function followUser(userId: string): Promise<boolean> {
 
 export async function unfollowUser(userId: string): Promise<boolean> {
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return false
+  if (!user) {
+    console.error('No user found for unfollow')
+    return false
+  }
+
+  console.log('Unfollowing user:', userId)
 
   const { error } = await supabase
     .from('follows')
@@ -35,6 +40,7 @@ export async function unfollowUser(userId: string): Promise<boolean> {
     return false
   }
 
+  console.log('Unfollowed successfully')
   return true
 }
 
@@ -119,7 +125,12 @@ export async function removeFollower(userId: string): Promise<boolean> {
 // Block a user
 export async function blockUser(userId: string): Promise<boolean> {
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return false
+  if (!user) {
+    console.error('No user found for blocking')
+    return false
+  }
+
+  console.log('Blocking user:', userId)
 
   // First unfollow them and remove them as follower
   await unfollowUser(userId)
@@ -130,7 +141,13 @@ export async function blockUser(userId: string): Promise<boolean> {
     .from('blocks')
     .insert({ blocker_id: user.id, blocked_id: userId })
 
-  return !error
+  if (error) {
+    console.error('Block error:', error)
+    return false
+  }
+
+  console.log('User blocked successfully')
+  return true
 }
 
 // Unblock a user

@@ -29,24 +29,33 @@ export default function Settings({ onClose }: SettingsProps) {
     try {
       // Create a unique file name
       const fileExt = file.name.split('.').pop()
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`
-      const filePath = `avatars/${fileName}`
+      const fileName = `avatar-${user.id}-${Date.now()}.${fileExt}`
+
+      console.log('Uploading avatar:', fileName)
 
       // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError, data: uploadData } = await supabase.storage
         .from('avatars')
-        .upload(filePath, file, { upsert: true })
+        .upload(fileName, file, { upsert: true })
 
-      if (uploadError) throw uploadError
+      if (uploadError) {
+        console.error('Upload error:', uploadError)
+        throw uploadError
+      }
+
+      console.log('Upload success:', uploadData)
 
       // Get public URL
       const { data } = supabase.storage
         .from('avatars')
-        .getPublicUrl(filePath)
+        .getPublicUrl(fileName)
+
+      console.log('Public URL:', data.publicUrl)
 
       setAvatarUrl(data.publicUrl)
       setMessage({ type: 'success', text: 'Image uploaded! Click Save to apply.' })
     } catch (err: any) {
+      console.error('Image upload failed:', err)
       setMessage({ type: 'error', text: err.message || 'Failed to upload image' })
     } finally {
       setUploading(false)
@@ -60,7 +69,9 @@ export default function Settings({ onClose }: SettingsProps) {
     setMessage(null)
 
     try {
-      const { error } = await supabase
+      console.log('Saving profile:', { fullName, username, bio, avatarUrl })
+
+      const { error, data } = await supabase
         .from('profiles')
         .update({
           full_name: fullName.trim(),
@@ -70,22 +81,30 @@ export default function Settings({ onClose }: SettingsProps) {
           updated_at: new Date().toISOString()
         })
         .eq('id', user.id)
+        .select()
+        .single()
 
-      if (error) throw error
+      if (error) {
+        console.error('Profile update error:', error)
+        throw error
+      }
+
+      console.log('Profile updated:', data)
 
       // Update local state
-      if (profile) {
+      if (profile && data) {
         setProfile({
           ...profile,
-          full_name: fullName.trim(),
-          username: username.trim().toLowerCase(),
-          bio: bio.trim(),
-          avatar_url: avatarUrl
+          full_name: data.full_name,
+          username: data.username,
+          bio: data.bio,
+          avatar_url: data.avatar_url
         })
       }
 
       setMessage({ type: 'success', text: 'Profile updated successfully!' })
     } catch (err: any) {
+      console.error('Save failed:', err)
       setMessage({ type: 'error', text: err.message || 'Failed to update profile' })
     } finally {
       setSaving(false)
