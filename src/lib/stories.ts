@@ -185,11 +185,11 @@ export async function uploadStoryMedia(file: File): Promise<string | null> {
   }
 
   const fileExt = file.name.split('.').pop()
-  const fileName = `story-${user.id}-${Date.now()}.${fileExt}`
+  const fileName = `${user.id}/${Date.now()}.${fileExt}`
 
-  // Upload to the 'avatars' bucket
+  // Upload to the 'stories' bucket
   const { error: uploadError } = await supabase.storage
-    .from('avatars')
+    .from('stories')
     .upload(fileName, file, {
       cacheControl: '3600',
       upsert: true
@@ -197,28 +197,30 @@ export async function uploadStoryMedia(file: File): Promise<string | null> {
 
   if (uploadError) {
     console.error('Error uploading story media:', uploadError)
-    // Try alternative approach
-    const { error: retryError } = await supabase.storage
+    
+    // Try avatars bucket as fallback
+    const fallbackName = `story-${user.id}-${Date.now()}.${fileExt}`
+    const { error: fallbackError } = await supabase.storage
       .from('avatars')
-      .upload(`stories/${fileName}`, file, {
+      .upload(fallbackName, file, {
         cacheControl: '3600',
         upsert: true
       })
     
-    if (retryError) {
-      console.error('Retry upload also failed:', retryError)
+    if (fallbackError) {
+      console.error('Fallback upload also failed:', fallbackError)
       return null
     }
     
     const { data } = supabase.storage
       .from('avatars')
-      .getPublicUrl(`stories/${fileName}`)
+      .getPublicUrl(fallbackName)
     
     return data.publicUrl
   }
 
   const { data } = supabase.storage
-    .from('avatars')
+    .from('stories')
     .getPublicUrl(fileName)
 
   console.log('Story uploaded successfully:', data.publicUrl)
