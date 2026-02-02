@@ -1,0 +1,104 @@
+import { supabase } from '@/lib/supabase/client'
+
+export async function followUser(userId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { error } = await supabase
+    .from('follows')
+    .insert({
+      follower_id: user.id,
+      following_id: userId,
+      status: 'accepted'
+    } as any)
+
+  if (error) {
+    console.error('Follow error:', error)
+    return false
+  }
+
+  return true
+}
+
+export async function unfollowUser(userId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { error } = await supabase
+    .from('follows')
+    .delete()
+    .eq('follower_id', user.id)
+    .eq('following_id', userId)
+
+  if (error) {
+    console.error('Unfollow error:', error)
+    return false
+  }
+
+  return true
+}
+
+export async function getFollowers(userId: string) {
+  const { data, error } = await supabase
+    .from('follows')
+    .select(`
+      follower:profiles!follows_follower_id_fkey(
+        id, username, full_name, avatar_url, is_online, status
+      )
+    `)
+    .eq('following_id', userId)
+    .eq('status', 'accepted')
+
+  if (error) {
+    console.error('Get followers error:', error)
+    return []
+  }
+
+  return data?.map((f: any) => f.follower) || []
+}
+
+export async function getFollowing(userId: string) {
+  const { data, error } = await supabase
+    .from('follows')
+    .select(`
+      following:profiles!follows_following_id_fkey(
+        id, username, full_name, avatar_url, is_online, status
+      )
+    `)
+    .eq('follower_id', userId)
+    .eq('status', 'accepted')
+
+  if (error) {
+    console.error('Get following error:', error)
+    return []
+  }
+
+  return data?.map((f: any) => f.following) || []
+}
+
+export async function checkFollowStatus(targetUserId: string) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { isFollowing: false, isFollower: false }
+
+  const [followingResult, followerResult] = await Promise.all([
+    supabase
+      .from('follows')
+      .select('id')
+      .eq('follower_id', user.id)
+      .eq('following_id', targetUserId)
+      .eq('status', 'accepted')
+      .single(),
+    supabase
+      .from('follows')
+      .select('id')
+      .eq('follower_id', targetUserId)
+      .eq('following_id', user.id)
+      .eq('status', 'accepted')
+      .single()
+  ])
+
+  return {
+    isFollowing: !!followingResult.data,
+    isFollower: !!followerResult.data
+  }
+}
