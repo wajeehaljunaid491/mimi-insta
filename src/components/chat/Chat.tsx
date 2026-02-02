@@ -13,6 +13,8 @@ import {
   unsubscribeFromMessages,
   getUnreadCount,
   deleteMessage,
+  deleteMessages,
+  editMessage,
   deleteChat
 } from '@/lib/messages'
 import { getFollowing } from '@/lib/follows'
@@ -54,6 +56,8 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
   const [isSelectMode, setIsSelectMode] = useState(false)
   const [showChatOptions, setShowChatOptions] = useState(false)
   const [callingUser, setCallingUser] = useState(false)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editingContent, setEditingContent] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -141,6 +145,17 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
       (messageId) => {
         setMessages(prev => prev.map(m => 
           m.id === messageId ? { ...m, is_read: true } : m
+        ))
+      },
+      // Handle message deleted
+      (messageId) => {
+        setMessages(prev => prev.filter(m => m.id !== messageId))
+        loadConversations()
+      },
+      // Handle message updated (edited)
+      (updatedMsg) => {
+        setMessages(prev => prev.map(m => 
+          m.id === updatedMsg.id ? updatedMsg : m
         ))
       }
     )
@@ -517,19 +532,40 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
     setCallingUser(false)
   }
 
-  // Handle delete message
-  const handleDeleteMessage = async (messageId: string, forEveryone: boolean) => {
-    const success = await deleteMessage(messageId, forEveryone)
+  // Handle delete message - deletes for both users
+  const handleDeleteMessage = async (messageId: string) => {
+    const success = await deleteMessage(messageId)
     if (success) {
-      if (forEveryone) {
-        setMessages(prev => prev.map(m => 
-          m.id === messageId ? { ...m, content: 'This message was deleted', deleted_for_everyone: true } : m
-        ))
-      } else {
-        setMessages(prev => prev.filter(m => m.id !== messageId))
-      }
+      setMessages(prev => prev.filter(m => m.id !== messageId))
     }
     setSelectedMessageId(null)
+  }
+
+  // Handle edit message
+  const handleStartEdit = (messageId: string, currentContent: string) => {
+    setEditingMessageId(messageId)
+    setEditingContent(currentContent)
+    setSelectedMessageId(null)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingMessageId || !editingContent.trim()) return
+    
+    const success = await editMessage(editingMessageId, editingContent.trim())
+    if (success) {
+      setMessages(prev => prev.map(m => 
+        m.id === editingMessageId 
+          ? { ...m, content: editingContent.trim(), is_edited: true } 
+          : m
+      ))
+    }
+    setEditingMessageId(null)
+    setEditingContent('')
+  }
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null)
+    setEditingContent('')
   }
 
   // Toggle message selection for multi-select
@@ -546,22 +582,13 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
   }
 
   // Delete multiple selected messages
-  const handleDeleteSelectedMessages = async (forEveryone: boolean) => {
+  const handleDeleteSelectedMessages = async () => {
     if (selectedMessages.size === 0) return
     
     const messageIds = Array.from(selectedMessages)
-    let successCount = 0
+    const success = await deleteMessages(messageIds)
     
-    for (const messageId of messageIds) {
-      const success = await deleteMessage(messageId, forEveryone)
-      if (success) successCount++
-    }
-
-    if (forEveryone) {
-      setMessages(prev => prev.map(m => 
-        selectedMessages.has(m.id) ? { ...m, content: 'This message was deleted', deleted_for_everyone: true } : m
-      ))
-    } else {
+    if (success) {
       setMessages(prev => prev.filter(m => !selectedMessages.has(m.id)))
     }
 
@@ -753,20 +780,15 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
               </span>
             </div>
             {selectedMessages.size > 0 && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleDeleteSelectedMessages(false)}
-                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-gray-300 transition-colors"
-                >
-                  Delete for me
-                </button>
-                <button
-                  onClick={() => handleDeleteSelectedMessages(true)}
-                  className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 rounded-lg text-sm text-red-400 transition-colors"
-                >
-                  Delete for everyone
-                </button>
-              </div>
+              <button
+                onClick={() => handleDeleteSelectedMessages()}
+                className="px-4 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-sm text-white font-medium transition-colors flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete ({selectedMessages.size})
+              </button>
             )}
           </div>
         )}
@@ -861,6 +883,9 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
                   )}
                   <div className={`flex items-center gap-1.5 mt-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
                     <span className="text-[10px] opacity-60">{formatTime(msg.created_at)}</span>
+                    {(msg as any).is_edited && (
+                      <span className="text-[10px] opacity-50 italic">edited</span>
+                    )}
                     {isMine && !isDeleted && (
                       <span className={`text-[10px] ${msg.is_read ? 'text-cyan-300' : 'opacity-60'}`}>
                         {msg.is_read ? '✓✓' : '✓'}
@@ -870,28 +895,30 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
                 </div>
 
                 {/* Message Options Popup */}
-                {isSelected && !isDeleted && (
+                {isSelected && !isSelectMode && !isDeleted && (
                   <div className={`absolute ${isMine ? 'right-0' : 'left-0'} top-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden`}>
+                    {/* Edit - only for sender */}
+                    {isMine && !isVoice && (
+                      <button
+                        onClick={() => handleStartEdit(msg.id, msg.content)}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Edit
+                      </button>
+                    )}
+                    {/* Delete */}
                     <button
-                      onClick={() => handleDeleteMessage(msg.id, false)}
-                      className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap"
+                      onClick={() => handleDeleteMessage(msg.id)}
+                      className={`w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap ${isMine && !isVoice ? 'border-t border-slate-700' : ''}`}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
-                      Delete for me
+                      Delete
                     </button>
-                    {isMine && (
-                      <button
-                        onClick={() => handleDeleteMessage(msg.id, true)}
-                        className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap border-t border-slate-700"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                        Delete for everyone
-                      </button>
-                    )}
                   </div>
                 )}
               </div>
@@ -900,6 +927,43 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Edit Message UI */}
+      {editingMessageId && (
+        <div className="px-4 py-3 bg-cyan-500/10 border-t border-cyan-500/30 flex items-center gap-3">
+          <div className="flex-1">
+            <p className="text-xs text-cyan-400 mb-1">Editing message</p>
+            <input
+              type="text"
+              value={editingContent}
+              onChange={(e) => setEditingContent(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveEdit()
+                if (e.key === 'Escape') handleCancelEdit()
+              }}
+              className="w-full bg-slate-800 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              autoFocus
+            />
+          </div>
+          <button
+            onClick={handleCancelEdit}
+            className="p-2 text-gray-400 hover:text-white transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <button
+            onClick={handleSaveEdit}
+            disabled={!editingContent.trim()}
+            className="p-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 transition-colors disabled:opacity-50"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Voice Recording UI */}
       {isRecording && (

@@ -188,7 +188,9 @@ export async function getUnreadCount(): Promise<number> {
 export function subscribeToMessages(
   userId: string,
   onNewMessage: (message: Message) => void,
-  onMessageRead: (messageId: string) => void
+  onMessageRead: (messageId: string) => void,
+  onMessageDeleted?: (messageId: string) => void,
+  onMessageUpdated?: (message: Message) => void
 ): RealtimeChannel {
   const channel = supabase
     .channel(`messages:${userId}`)
@@ -231,6 +233,46 @@ export function subscribeToMessages(
         }
       }
     )
+    .on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'messages'
+      },
+      (payload) => {
+        // Message was deleted - notify if callback provided
+        if (onMessageDeleted) {
+          onMessageDeleted(payload.old.id)
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages'
+      },
+      async (payload) => {
+        // Message was updated (edited)
+        if (onMessageUpdated && payload.new.is_edited) {
+          const { data } = await supabase
+            .from('messages')
+            .select(`
+              *,
+              sender:profiles!messages_sender_id_fkey(id, username, avatar_url),
+              receiver:profiles!messages_receiver_id_fkey(id, username, avatar_url)
+            `)
+            .eq('id', payload.new.id)
+            .single()
+
+          if (data) {
+            onMessageUpdated(data)
+          }
+        }
+      }
+    )
     .subscribe()
 
   return channel
@@ -240,43 +282,87 @@ export function subscribeToMessages(
 export function unsubscribeFromMessages(channel: RealtimeChannel) {
   supabase.removeChannel(channel)
 }
-// Delete message (for me only or for everyone)
-export async function deleteMessage(messageId: string, forEveryone: boolean = false): Promise<boolean> {
+
+// Delete message - ALWAYS deletes for both users
+export async function deleteMessage(messageId: string): Promise<boolean> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false
 
-  if (forEveryone) {
-    // Delete for everyone - update the message
-    const { error } = await supabase
-      .from('messages')
-      .update({ deleted_for_everyone: true, content: 'This message was deleted' })
-      .eq('id', messageId)
-      .eq('sender_id', user.id) // Only sender can delete for everyone
+  // Actually delete the message from database
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .eq('id', messageId)
+    .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
 
-    return !error
-  } else {
-    // Delete for me only - add to deletions table
-    const { error } = await supabase
-      .from('message_deletions')
-      .insert({ message_id: messageId, user_id: user.id })
-
-    return !error
+  if (error) {
+    console.error('Delete message error:', error)
+    return false
   }
+
+  return true
 }
 
-// Delete entire chat
+// Delete multiple messages
+export async function deleteMessages(messageIds: string[]): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .in('id', messageIds)
+    .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+
+  if (error) {
+    console.error('Delete messages error:', error)
+    return false
+  }
+
+  return true
+}
+
+// Edit message
+export async function editMessage(messageId: string, newContent: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { error } = await supabase
+    .from('messages')
+    .update({ 
+      content: newContent,
+      is_edited: true,
+      edited_at: new Date().toISOString()
+    })
+    .eq('id', messageId)
+    .eq('sender_id', user.id) // Only sender can edit
+
+  if (error) {
+    console.error('Edit message error:', error)
+    return false
+  }
+
+  return true
+}
+
+// Delete entire chat - actually deletes all messages between users
 export async function deleteChat(otherUserId: string): Promise<boolean> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false
 
-  // Mark chat as deleted for this user
-  const { error } = await supabase
-    .from('chat_deletions')
-    .upsert({ 
-      user_id: user.id, 
-      other_user_id: otherUserId,
-      deleted_at: new Date().toISOString()
-    })
+  console.log('Deleting chat with:', otherUserId)
 
-  return !error
+  // Delete all messages between the two users
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${user.id})`)
+
+  if (error) {
+    console.error('Delete chat error:', error)
+    return false
+  }
+
+  console.log('Chat deleted successfully')
+  return true
 }
