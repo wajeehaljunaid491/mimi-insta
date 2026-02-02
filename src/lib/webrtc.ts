@@ -1,14 +1,33 @@
 import { supabase } from '@/lib/supabase/client'
 
 // STUN/TURN servers for WebRTC connection
-const ICE_SERVERS = {
+// Added free TURN servers for better connectivity (works behind NAT/firewalls)
+const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
+    // Google STUN servers
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-  ]
+    // OpenRelay TURN servers (free, public)
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    // Twilio STUN (free)
+    { urls: 'stun:global.stun.twilio.com:3478' },
+  ],
+  iceCandidatePoolSize: 10
 }
 
 export interface WebRTCCallbacks {
@@ -250,12 +269,35 @@ class WebRTCService {
         callbacks.onConnectionStateChange?.(this.peerConnection?.connectionState || 'closed')
         
         if (this.peerConnection?.connectionState === 'failed') {
-          callbacks.onError?.(new Error('Connection failed'))
+          // Try ICE restart on failure
+          this.attemptReconnect()
         }
       }
 
       this.peerConnection.oniceconnectionstatechange = () => {
         console.log('ICE connection state:', this.peerConnection?.iceConnectionState)
+        
+        // Handle ICE connection failures
+        if (this.peerConnection?.iceConnectionState === 'failed') {
+          console.log('ICE failed, attempting restart...')
+          this.attemptReconnect()
+        }
+        
+        // Handle disconnection
+        if (this.peerConnection?.iceConnectionState === 'disconnected') {
+          console.log('ICE disconnected, waiting for reconnection...')
+          // Give it some time to reconnect automatically
+          setTimeout(() => {
+            if (this.peerConnection?.iceConnectionState === 'disconnected') {
+              this.attemptReconnect()
+            }
+          }, 5000)
+        }
+      }
+      
+      // Log ICE gathering state
+      this.peerConnection.onicegatheringstatechange = () => {
+        console.log('ICE gathering state:', this.peerConnection?.iceGatheringState)
       }
 
       if (isCaller) {
@@ -285,6 +327,9 @@ class WebRTCService {
       
       await this.peerConnection.setLocalDescription(offer)
       console.log('Created offer:', offer.type)
+
+      // Wait briefly for initial ICE candidates to be gathered
+      await new Promise(resolve => setTimeout(resolve, 500))
 
       // Save offer to database
       const { error } = await supabase
@@ -440,7 +485,7 @@ class WebRTCService {
   private hasProcessedAnswer = false
 
   private startSignalingPolling(): void {
-    // Poll for signaling data every 500ms
+    // Poll for signaling data every 300ms for faster connection
     this.pollingInterval = setInterval(async () => {
       if (!this.callId) return
 
@@ -478,7 +523,7 @@ class WebRTCService {
       } catch (error) {
         console.error('Polling error:', error)
       }
-    }, 500)
+    }, 300) // Fast polling for quicker connection
   }
 
   toggleMute(): boolean {
@@ -507,6 +552,47 @@ class WebRTCService {
     // Speaker toggle would require audio output device selection
     // This is a placeholder - actual implementation depends on browser API
     return false
+  }
+
+  private async attemptReconnect(): Promise<void> {
+    if (!this.peerConnection || !this.callId) return
+    
+    console.log('Attempting ICE restart...')
+    
+    try {
+      // Create new offer with ICE restart flag
+      const offer = await this.peerConnection.createOffer({ 
+        iceRestart: true,
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      })
+      
+      await this.peerConnection.setLocalDescription(offer)
+      
+      // Save new offer to database
+      const { error } = await supabase
+        .from('call_logs')
+        .update({ 
+          offer: {
+            type: offer.type,
+            sdp: offer.sdp
+          },
+          ice_candidates: [] // Clear old candidates for fresh restart
+        })
+        .eq('id', this.callId)
+
+      if (error) {
+        console.error('Error saving restart offer:', error)
+      } else {
+        console.log('ICE restart offer sent')
+        // Reset processed state for fresh signaling
+        this.hasProcessedAnswer = false
+        this.processedCandidates.clear()
+      }
+    } catch (error) {
+      console.error('ICE restart failed:', error)
+      this.callbacks.onError?.(new Error('Connection lost. Please try again.'))
+    }
   }
 
   cleanup(): void {

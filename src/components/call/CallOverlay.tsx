@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore'
 import { answerCall, rejectCall, endCall, cancelCall } from '@/lib/calls'
 import { webRTCService } from '@/lib/webrtc'
 import { CallSounds } from '@/lib/sounds'
+import AddToCallModal from './AddToCallModal'
 
 interface ActiveCall {
   id: string
@@ -35,6 +36,7 @@ export default function CallOverlay() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [ringDuration, setRingDuration] = useState(0)
+  const [showAddPeople, setShowAddPeople] = useState(false)
   
   const user = useAuthStore((state) => state.user)
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -456,13 +458,15 @@ export default function CallOverlay() {
   }
 
   const handleToggleMute = () => {
-    const muted = webRTCService.toggleMute()
-    setIsMuted(muted)
+    const newMuted = !isMuted
+    webRTCService.toggleMute()
+    setIsMuted(newMuted)
   }
 
   const handleToggleVideo = () => {
-    const videoOff = webRTCService.toggleVideo()
-    setIsVideoOff(videoOff)
+    const newVideoOff = !isVideoOff
+    webRTCService.toggleVideo()
+    setIsVideoOff(newVideoOff)
   }
 
   const handleToggleSpeaker = () => {
@@ -703,6 +707,19 @@ export default function CallOverlay() {
               </div>
             )}
 
+            {/* Add People Button - only for caller */}
+            {activeCall.is_caller && isConnected && (
+              <div className="flex flex-col items-center">
+                <button
+                  onClick={() => setShowAddPeople(true)}
+                  className="w-16 h-16 rounded-full bg-cyan-500 text-white text-2xl flex items-center justify-center backdrop-blur-sm transition-all hover:scale-105 active:scale-95 mb-2"
+                >
+                  👥
+                </button>
+                <span className="text-white text-sm font-medium">Add</span>
+              </div>
+            )}
+
             <div className="flex flex-col items-center">
               <button
                 onClick={handleEnd}
@@ -729,6 +746,18 @@ export default function CallOverlay() {
           </div>
         )}
       </div>
+
+      {/* Add People Modal */}
+      {showAddPeople && activeCall && (
+        <AddToCallModal
+          isOpen={showAddPeople}
+          callId={activeCall.id}
+          onClose={() => setShowAddPeople(false)}
+          onUserAdded={(userId) => {
+            console.log('User added to call:', userId)
+          }}
+        />
+      )}
     </div>
   )
 }
