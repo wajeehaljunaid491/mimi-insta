@@ -91,7 +91,7 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 
 -- =====================================================
--- STEP 2: CREATE SECURITY DEFINER FUNCTION (bypasses RLS)
+-- STEP 2: CREATE SECURITY DEFINER FUNCTIONS (bypasses RLS)
 -- This prevents infinite recursion
 -- =====================================================
 
@@ -116,6 +116,30 @@ AS $$
   SELECT EXISTS (
     SELECT 1 FROM group_chats 
     WHERE id = check_group_id AND created_by = check_user_id
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION is_call_initiator(check_call_id UUID, check_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM group_calls 
+    WHERE id = check_call_id AND initiator_id = check_user_id
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION is_call_participant(check_call_id UUID, check_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM call_participants 
+    WHERE call_id = check_call_id AND user_id = check_user_id
   );
 $$;
 
@@ -193,12 +217,12 @@ CREATE POLICY "Delete own messages"
 ON group_messages FOR DELETE
 USING (sender_id = auth.uid());
 
--- 4.4 GROUP CALLS POLICIES
+-- 4.4 GROUP CALLS POLICIES (using functions - NO recursion)
 CREATE POLICY "View calls"
 ON group_calls FOR SELECT
 USING (
   initiator_id = auth.uid() OR
-  EXISTS (SELECT 1 FROM call_participants WHERE call_id = group_calls.id AND user_id = auth.uid())
+  is_call_participant(id, auth.uid())
 );
 
 CREATE POLICY "Start calls"
@@ -209,24 +233,24 @@ CREATE POLICY "Update own calls"
 ON group_calls FOR UPDATE
 USING (initiator_id = auth.uid());
 
--- 4.5 CALL PARTICIPANTS POLICIES
+-- 4.5 CALL PARTICIPANTS POLICIES (using functions - NO recursion)
 CREATE POLICY "View participants"
 ON call_participants FOR SELECT
 USING (
   user_id = auth.uid() OR
-  EXISTS (SELECT 1 FROM group_calls WHERE id = call_participants.call_id AND initiator_id = auth.uid())
+  is_call_initiator(call_id, auth.uid())
 );
 
 CREATE POLICY "Join calls"
 ON call_participants FOR INSERT
 WITH CHECK (
   user_id = auth.uid() OR
-  EXISTS (SELECT 1 FROM group_calls WHERE id = call_id AND initiator_id = auth.uid())
+  is_call_initiator(call_id, auth.uid())
 );
 
 CREATE POLICY "Update own participant status"
 ON call_participants FOR UPDATE
-USING (user_id = auth.uid());
+USING (user_id = auth.uid() OR is_call_initiator(call_id, auth.uid()));
 
 -- =====================================================
 -- STEP 5: CREATE STORAGE BUCKETS (avatars + stories)

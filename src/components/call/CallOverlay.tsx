@@ -326,24 +326,12 @@ export default function CallOverlay() {
       }
     }
 
-    const handleVisibilityChange = () => {
-      // On iOS, visibilitychange is more reliable than beforeunload
-      if (document.visibilityState === 'hidden' && activeCall && !isEnding) {
-        // Try to end the call when page becomes hidden
-        if (activeCall.status === 'accepted') {
-          endCall(activeCall.id)
-        } else {
-          cancelCall(activeCall.id)
-        }
-      }
-    }
-
+    // Only end call on actual page close, not on visibility change
+    // This prevents calls from ending when switching tabs/apps
     window.addEventListener('beforeunload', handleBeforeUnload)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [activeCall, isEnding])
 

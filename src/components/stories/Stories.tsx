@@ -227,13 +227,13 @@ export default function Stories() {
         )}
       </div>
 
-      {/* Story Viewer Modal */}
+      {/* Story Viewer Modal - Full Screen WhatsApp Style */}
       {activeStory && currentStory && currentUser && (
-        <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black z-50">
           {/* Progress Bars */}
-          <div className="absolute top-0 left-0 right-0 flex gap-1 p-2 z-10">
+          <div className="absolute top-0 left-0 right-0 flex gap-1 p-2 pt-safe z-20">
             {storyUsers[activeStory.userIndex].stories.map((_, idx) => (
-              <div key={idx} className="flex-1 h-1 bg-white/30 rounded-full overflow-hidden">
+              <div key={idx} className="flex-1 h-0.5 bg-white/30 rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-white transition-all duration-100"
                   style={{ 
@@ -246,7 +246,7 @@ export default function Stories() {
           </div>
 
           {/* Header */}
-          <div className="absolute top-8 left-0 right-0 flex items-center justify-between px-4 z-10">
+          <div className="absolute top-6 left-0 right-0 flex items-center justify-between px-4 z-20">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-teal-500 flex items-center justify-center text-white font-semibold overflow-hidden">
                 {currentUser.avatar_url ? (
@@ -295,19 +295,22 @@ export default function Stories() {
             </div>
           </div>
 
-          {/* Story Content */}
-          <div className="w-full h-full flex items-center justify-center">
+          {/* Story Content - Full Screen */}
+          <div className="absolute inset-0 flex items-center justify-center">
             {currentStory.media_type === 'video' ? (
               <video
                 src={currentStory.media_url}
                 autoPlay
-                className="max-w-full max-h-full object-contain"
+                playsInline
+                muted={false}
+                className="w-full h-full object-cover"
               />
             ) : (
               <img
                 src={currentStory.media_url}
                 alt=""
-                className="max-w-full max-h-full object-contain"
+                className="w-full h-full object-cover"
+                style={{ objectPosition: 'center' }}
               />
             )}
           </div>
@@ -319,11 +322,11 @@ export default function Stories() {
             </div>
           )}
 
-          {/* Navigation Touch Areas */}
-          <div className="absolute inset-0 flex">
-            <div className="w-1/3 h-full" onClick={prevStory}></div>
+          {/* Navigation Touch Areas - Over the content */}
+          <div className="absolute inset-0 flex z-10">
+            <div className="w-1/3 h-full cursor-pointer" onClick={prevStory}></div>
             <div className="w-1/3 h-full"></div>
-            <div className="w-1/3 h-full" onClick={nextStory}></div>
+            <div className="w-1/3 h-full cursor-pointer" onClick={nextStory}></div>
           </div>
 
           {/* Views Count (for own stories) */}
