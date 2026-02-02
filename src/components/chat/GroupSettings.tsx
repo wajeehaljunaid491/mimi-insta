@@ -133,7 +133,7 @@ export default function GroupSettings({ groupId, onClose, onGroupDeleted }: Grou
     try {
       await updateGroup(groupId, {
         name: editName.trim(),
-        description: editDescription.trim() || null
+        description: editDescription.trim() || undefined
       })
       await loadData()
       setIsEditing(false)
