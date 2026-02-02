@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/client'
 import { useAuthStore } from '@/store/authStore'
 import { answerCall, rejectCall, endCall, cancelCall } from '@/lib/calls'
 import { webRTCService } from '@/lib/webrtc'
+import { CallSounds } from '@/lib/sounds'
 
 interface ActiveCall {
   id: string
@@ -15,7 +16,11 @@ interface ActiveCall {
   call_type: 'voice' | 'video'
   status: string
   is_caller: boolean
+  started_at?: string
 }
+
+// Auto-cancel call after 60 seconds if no answer
+const CALL_TIMEOUT_SECONDS = 60
 
 export default function CallOverlay() {
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null)
@@ -29,6 +34,7 @@ export default function CallOverlay() {
   const [isEnding, setIsEnding] = useState(false)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const [ringDuration, setRingDuration] = useState(0)
   
   const user = useAuthStore((state) => state.user)
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -36,6 +42,46 @@ export default function CallOverlay() {
   const durationRef = useRef<NodeJS.Timeout | null>(null)
   const pollRef = useRef<NodeJS.Timeout | null>(null)
   const endingCallId = useRef<string | null>(null)
+  const ringTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const soundStarted = useRef<boolean>(false)
+
+  // Play ringing sound
+  const playRingSound = useCallback((isIncoming: boolean) => {
+    if (soundStarted.current) return
+    soundStarted.current = true
+    
+    try {
+      if (isIncoming) {
+        CallSounds.playIncomingRing()
+      } else {
+        CallSounds.playOutgoingRing()
+      }
+    } catch (err) {
+      console.log('Ring sound error:', err)
+    }
+  }, [])
+
+  // Stop ringing sound
+  const stopRingSound = useCallback(() => {
+    CallSounds.stop()
+    soundStarted.current = false
+    if (ringTimerRef.current) {
+      clearInterval(ringTimerRef.current)
+      ringTimerRef.current = null
+    }
+    setRingDuration(0)
+  }, [])
+
+  // Auto-cancel call after timeout
+  const autoCancelCall = useCallback(async (callId: string) => {
+    console.log('Auto-cancelling call after timeout:', callId)
+    stopRingSound()
+    await cancelCall(callId)
+    setActiveCall(null)
+    setIsEnding(false)
+    endingCallId.current = null
+    window.location.reload()
+  }, [stopRingSound])
 
   // Check for active calls
   const checkActiveCall = useCallback(async () => {
@@ -85,12 +131,14 @@ export default function CallOverlay() {
           call_type: callData.call_type,
           status: callData.status,
           is_caller: callData.caller_id === user.id,
+          started_at: callData.started_at,
         }
         
         setActiveCall(newCall)
       } else if (activeCall && !isEnding) {
         // Other user ended the call - cleanup and refresh
         console.log('Call ended by other user, cleaning up and refreshing')
+        stopRingSound()
         webRTCService.cleanup()
         setWebrtcInitialized(false)
         setActiveCall(null)
@@ -117,6 +165,48 @@ export default function CallOverlay() {
       if (pollRef.current) clearInterval(pollRef.current)
     }
   }, [user, checkActiveCall])
+
+  // Handle ringing sound and auto-cancel timer
+  useEffect(() => {
+    if (!activeCall) {
+      stopRingSound()
+      return
+    }
+
+    // Play ringing sound when call is in calling/ringing state
+    if (activeCall.status === 'calling' || activeCall.status === 'ringing') {
+      // Start ring sound
+      playRingSound(!activeCall.is_caller)
+      
+      // Start ring duration timer (for auto-cancel)
+      if (!ringTimerRef.current) {
+        ringTimerRef.current = setInterval(() => {
+          setRingDuration(prev => {
+            const newDuration = prev + 1
+            // Auto-cancel if caller and exceeded timeout
+            if (activeCall.is_caller && newDuration >= CALL_TIMEOUT_SECONDS) {
+              autoCancelCall(activeCall.id)
+            }
+            return newDuration
+          })
+        }, 1000)
+      }
+    } else if (activeCall.status === 'accepted') {
+      // Stop ringing when call is accepted
+      stopRingSound()
+    }
+
+    return () => {
+      // Cleanup on unmount or when activeCall changes
+    }
+  }, [activeCall?.id, activeCall?.status, activeCall?.is_caller, playRingSound, stopRingSound, autoCancelCall])
+
+  // Cleanup ring sound on unmount
+  useEffect(() => {
+    return () => {
+      stopRingSound()
+    }
+  }, [stopRingSound])
 
   // Initialize WebRTC when appropriate
   useEffect(() => {
@@ -419,22 +509,24 @@ export default function CallOverlay() {
       {/* Main Content */}
       <div className="flex-1 flex items-center justify-center p-4 overflow-hidden">
         {isVideoCall && isConnected ? (
-          <div className="relative w-full h-full max-w-4xl">
-            {/* Remote video - full screen */}
-            <video
-              ref={remoteVideoRef}
-              autoPlay
-              playsInline
-              className="w-full h-full object-cover rounded-3xl bg-gray-800"
-            />
-            {!remoteStream && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-800 rounded-3xl">
-                <span className="text-white animate-pulse">Connecting video...</span>
-              </div>
-            )}
+          <div className="relative w-full h-full max-w-md mx-auto flex items-center justify-center">
+            {/* Remote video - portrait orientation for faces */}
+            <div className="relative w-full h-full max-h-[80vh] aspect-[3/4] bg-gray-800 rounded-3xl overflow-hidden">
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              {!remoteStream && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
+                  <span className="text-white animate-pulse">Connecting video...</span>
+                </div>
+              )}
+            </div>
             
-            {/* Local video - small overlay */}
-            <div className="absolute bottom-4 right-4 w-28 h-40 sm:w-36 sm:h-48 bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border-2 border-white/30">
+            {/* Local video - small overlay in corner */}
+            <div className="absolute bottom-6 right-6 w-24 h-32 sm:w-28 sm:h-36 aspect-[3/4] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border-2 border-white/30">
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -449,8 +541,8 @@ export default function CallOverlay() {
               )}
               {isVideoOff && (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-gray-700 text-white">
-                  <span className="text-3xl mb-1">📷</span>
-                  <span className="text-xs">Camera Off</span>
+                  <span className="text-2xl mb-1">📷</span>
+                  <span className="text-xs">Off</span>
                 </div>
               )}
             </div>

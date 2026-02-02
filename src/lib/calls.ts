@@ -235,3 +235,71 @@ export async function getActiveCall() {
 
   return data
 }
+
+// Delete a single call from history
+export async function deleteCall(callId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { error } = await supabase
+    .from('call_logs')
+    .delete()
+    .eq('id', callId)
+    .or(`caller_id.eq.${user.id},receiver_id.eq.${user.id}`)
+
+  if (error) {
+    console.error('Error deleting call:', error)
+    return false
+  }
+
+  return true
+}
+
+// Delete all call history for the current user
+export async function deleteAllCallHistory(): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { error } = await supabase
+    .from('call_logs')
+    .delete()
+    .or(`caller_id.eq.${user.id},receiver_id.eq.${user.id}`)
+
+  if (error) {
+    console.error('Error deleting call history:', error)
+    return false
+  }
+
+  return true
+}
+
+// Get call history with pagination
+export async function getCallHistoryPaginated(page: number = 0, pageSize: number = 10) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { calls: [], hasMore: false }
+
+  const from = page * pageSize
+  const to = from + pageSize
+
+  const { data, error, count } = await supabase
+    .from('call_logs')
+    .select(`
+      *,
+      caller:profiles!call_logs_caller_id_fkey(id, username, avatar_url),
+      receiver:profiles!call_logs_receiver_id_fkey(id, username, avatar_url)
+    `, { count: 'exact' })
+    .or(`caller_id.eq.${user.id},receiver_id.eq.${user.id}`)
+    .order('started_at', { ascending: false })
+    .range(from, to - 1)
+
+  if (error) {
+    console.error('Error fetching call history:', error)
+    return { calls: [], hasMore: false }
+  }
+
+  return {
+    calls: data || [],
+    hasMore: count ? from + pageSize < count : false,
+    total: count || 0
+  }
+}
