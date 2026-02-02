@@ -251,19 +251,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ loading: false })
       }
 
-      // Listen for auth changes with proper error handling
+      // Listen for auth changes with debouncing to prevent multiple triggers
+      let authDebounceTimer: NodeJS.Timeout | null = null
+      let lastEvent: string | null = null
+      
       try {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-          console.log('Auth state changed:', event)
           // Ignore INITIAL_SESSION as we already handled it above
           if (event === 'INITIAL_SESSION') return
           
-          if (event === 'SIGNED_IN' && session?.user) {
-            const profile = await get().fetchProfile(session.user.id)
-            set({ user: session.user, profile, loading: false })
-          } else if (event === 'SIGNED_OUT') {
-            set({ user: null, profile: null, loading: false })
-          }
+          // Debounce rapid auth changes to prevent loops
+          if (lastEvent === event) return
+          lastEvent = event
+          
+          if (authDebounceTimer) clearTimeout(authDebounceTimer)
+          
+          authDebounceTimer = setTimeout(async () => {
+            if (event === 'SIGNED_IN' && session?.user) {
+              // Only update if we don't already have this user
+              const currentUser = get().user
+              if (currentUser?.id === session.user.id) return
+              
+              const profile = await get().fetchProfile(session.user.id)
+              set({ user: session.user, profile, loading: false })
+            } else if (event === 'SIGNED_OUT') {
+              // Only sign out if we have a user
+              if (!get().user) return
+              set({ user: null, profile: null, loading: false })
+            } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+              // Just update the user object, keep profile
+              set({ user: session.user })
+            }
+          }, 100)
         })
         
         // Store subscription for cleanup if needed

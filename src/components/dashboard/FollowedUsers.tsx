@@ -71,7 +71,7 @@ export default function FollowedUsers() {
   if (loading) {
     return (
       <div className="flex justify-center py-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500 border-t-transparent"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-cyan-500 border-t-transparent"></div>
       </div>
     )
   }
@@ -103,7 +103,7 @@ export default function FollowedUsers() {
         >
           {/* Avatar */}
           <div className="relative">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold text-lg overflow-hidden">
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-500 to-teal-500 flex items-center justify-center text-white font-semibold text-lg overflow-hidden">
               {person.avatar_url ? (
                 <img src={person.avatar_url} alt="" className="w-full h-full object-cover" />
               ) : (
@@ -112,14 +112,14 @@ export default function FollowedUsers() {
             </div>
             {/* Online indicator */}
             <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-gray-800 ${
-              person.is_online ? 'bg-green-500' : 'bg-gray-500'
+              person.is_online ? 'bg-emerald-500 shadow-lg shadow-emerald-500/50' : 'bg-gray-500'
             }`}></div>
           </div>
 
           {/* User info */}
           <div className="flex-1 min-w-0">
             <p className="font-medium text-white truncate">{person.username}</p>
-            <p className={`text-xs ${person.is_online ? 'text-green-400' : 'text-gray-500'}`}>
+            <p className={`text-xs ${person.is_online ? 'text-emerald-400' : 'text-gray-500'}`}>
               {person.is_online ? 'Online' : 'Offline'}
             </p>
           </div>
@@ -132,7 +132,7 @@ export default function FollowedUsers() {
               disabled={callingId === person.id || !person.is_online}
               className={`p-2.5 rounded-full transition-all ${
                 person.is_online 
-                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' 
+                  ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30' 
                   : 'bg-gray-700 text-gray-500 cursor-not-allowed'
               }`}
               title={person.is_online ? 'Voice call' : 'User is offline'}
@@ -148,7 +148,7 @@ export default function FollowedUsers() {
               disabled={callingId === person.id || !person.is_online}
               className={`p-2.5 rounded-full transition-all ${
                 person.is_online 
-                  ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30' 
+                  ? 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30' 
                   : 'bg-gray-700 text-gray-500 cursor-not-allowed'
               }`}
               title={person.is_online ? 'Video call' : 'User is offline'}
@@ -181,7 +181,7 @@ export default function FollowedUsers() {
       {hasMore && (
         <button
           onClick={() => setShowAll(!showAll)}
-          className="w-full py-3 text-sm text-purple-400 hover:text-purple-300 font-medium transition-colors flex items-center justify-center gap-2"
+          className="w-full py-3 text-sm text-cyan-400 hover:text-cyan-300 font-medium transition-colors flex items-center justify-center gap-2"
         >
           {showAll ? (
             <>
