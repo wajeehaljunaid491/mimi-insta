@@ -11,14 +11,19 @@ import {
   markMessagesAsRead,
   subscribeToMessages,
   unsubscribeFromMessages,
-  getUnreadCount
+  getUnreadCount,
+  deleteMessage,
+  deleteChat
 } from '@/lib/messages'
 import { getFollowing } from '@/lib/follows'
+import { initiateCall } from '@/lib/calls'
 import { CallSounds } from '@/lib/sounds'
 import { RealtimeChannel } from '@supabase/supabase-js'
 
 interface ChatProps {
   onUnreadCountChange?: (count: number) => void
+  openUserId?: string | null
+  onOpenUserIdHandled?: () => void
 }
 
 interface FollowedUser {
@@ -28,7 +33,7 @@ interface FollowedUser {
   avatar_url: string | null
 }
 
-export default function Chat({ onUnreadCountChange }: ChatProps) {
+export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHandled }: ChatProps) {
   const { user } = useAuthStore()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [followedUsers, setFollowedUsers] = useState<FollowedUser[]>([])
@@ -44,6 +49,9 @@ export default function Chat({ onUnreadCountChange }: ChatProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [chatSearchQuery, setChatSearchQuery] = useState('')
   const [showChatSearch, setShowChatSearch] = useState(false)
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
+  const [showChatOptions, setShowChatOptions] = useState(false)
+  const [callingUser, setCallingUser] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -72,6 +80,37 @@ export default function Chat({ onUnreadCountChange }: ChatProps) {
       getUnreadCount().then(onUnreadCountChange)
     }
   }, [user, conversations, onUnreadCountChange])
+
+  // Handle opening chat with specific user from external trigger
+  useEffect(() => {
+    if (openUserId && user && !loading) {
+      // Check if we already have a conversation with this user
+      const existingConvo = conversations.find(c => c.user.id === openUserId)
+      if (existingConvo) {
+        openChat(existingConvo)
+      } else {
+        // Create a new conversation placeholder
+        const userToChat = followedUsers.find(f => f.id === openUserId)
+        if (userToChat) {
+          const newConvo: Conversation = {
+            user: {
+              id: userToChat.id,
+              username: userToChat.username,
+              full_name: userToChat.full_name,
+              avatar_url: userToChat.avatar_url,
+              is_online: false
+            },
+            lastMessage: null,
+            unreadCount: 0
+          }
+          setActiveChat(newConvo)
+          setMessages([])
+        }
+      }
+      // Clear the openUserId after handling
+      onOpenUserIdHandled?.()
+    }
+  }, [openUserId, user, loading, conversations, followedUsers])
 
   const setupRealtimeSubscription = useCallback(() => {
     if (!user) return
@@ -460,12 +499,46 @@ export default function Chat({ onUnreadCountChange }: ChatProps) {
     )
   }
 
+  // Handle call
+  const handleCall = async (callType: 'voice' | 'video') => {
+    if (!activeChat || callingUser) return
+    setCallingUser(true)
+    await initiateCall(activeChat.user.id, callType)
+    setCallingUser(false)
+  }
+
+  // Handle delete message
+  const handleDeleteMessage = async (messageId: string, forEveryone: boolean) => {
+    const success = await deleteMessage(messageId, forEveryone)
+    if (success) {
+      if (forEveryone) {
+        setMessages(prev => prev.map(m => 
+          m.id === messageId ? { ...m, content: 'This message was deleted', deleted_for_everyone: true } : m
+        ))
+      } else {
+        setMessages(prev => prev.filter(m => m.id !== messageId))
+      }
+    }
+    setSelectedMessageId(null)
+  }
+
+  // Handle delete chat
+  const handleDeleteChat = async () => {
+    if (!activeChat || !confirm('Delete this entire conversation?')) return
+    const success = await deleteChat(activeChat.user.id)
+    if (success) {
+      closeChat()
+      loadConversations()
+    }
+    setShowChatOptions(false)
+  }
+
   // Chat View
   return (
     <div className="h-full flex flex-col">
       {/* Chat Header */}
       <div className="border-b border-slate-700/50">
-        <div className="flex items-center gap-3 p-3">
+        <div className="flex items-center gap-2 p-3">
           <button 
             onClick={closeChat}
             className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors"
@@ -488,12 +561,46 @@ export default function Chat({ onUnreadCountChange }: ChatProps) {
             )}
           </div>
           
-          <div className="flex-1">
-            <p className="font-medium text-white">{activeChat.user.full_name || activeChat.user.username}</p>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-white truncate">{activeChat.user.full_name || activeChat.user.username}</p>
             <p className="text-xs text-gray-400">
-              {activeChat.user.is_online ? 'Online' : 'Offline'}
+              {activeChat.user.is_online ? (
+                <span className="text-emerald-400">● Online</span>
+              ) : 'Offline'}
             </p>
           </div>
+
+          {/* Voice Call Button */}
+          <button
+            onClick={() => handleCall('voice')}
+            disabled={callingUser || !activeChat.user.is_online}
+            className={`p-2 rounded-lg transition-colors ${
+              activeChat.user.is_online 
+                ? 'hover:bg-emerald-500/20 text-emerald-400' 
+                : 'text-gray-600 cursor-not-allowed'
+            }`}
+            title={activeChat.user.is_online ? 'Voice call' : 'User is offline'}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+            </svg>
+          </button>
+
+          {/* Video Call Button */}
+          <button
+            onClick={() => handleCall('video')}
+            disabled={callingUser || !activeChat.user.is_online}
+            className={`p-2 rounded-lg transition-colors ${
+              activeChat.user.is_online 
+                ? 'hover:bg-cyan-500/20 text-cyan-400' 
+                : 'text-gray-600 cursor-not-allowed'
+            }`}
+            title={activeChat.user.is_online ? 'Video call' : 'User is offline'}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </button>
 
           {/* Search button in chat */}
           <button
@@ -504,6 +611,33 @@ export default function Chat({ onUnreadCountChange }: ChatProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </button>
+
+          {/* More Options */}
+          <div className="relative">
+            <button
+              onClick={() => setShowChatOptions(!showChatOptions)}
+              className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors text-gray-400"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+              </svg>
+            </button>
+
+            {/* Options Dropdown */}
+            {showChatOptions && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden">
+                <button
+                  onClick={handleDeleteChat}
+                  className="w-full px-4 py-3 text-left text-red-400 hover:bg-slate-700/50 flex items-center gap-3 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Delete Chat
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Chat Search Bar */}
@@ -565,24 +699,30 @@ export default function Chat({ onUnreadCountChange }: ChatProps) {
           (chatSearchQuery ? filteredMessages : messages).map((msg) => {
             const isMine = msg.sender_id === user?.id
             const isVoice = msg.message_type === 'audio'
+            const isDeleted = (msg as any).deleted_for_everyone
+            const isSelected = selectedMessageId === msg.id
             
             return (
               <div
                 key={msg.id}
-                className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}
+                className={`flex ${isMine ? 'justify-end' : 'justify-start'} relative group`}
               >
                 <div
-                  className={`max-w-[75%] px-4 py-2.5 rounded-2xl ${
+                  onClick={() => setSelectedMessageId(isSelected ? null : msg.id)}
+                  className={`max-w-[75%] px-4 py-2.5 rounded-2xl cursor-pointer transition-all ${
                     isMine
                       ? 'bg-gradient-to-r from-cyan-600 to-teal-600 text-white rounded-br-md'
                       : 'bg-slate-700 text-white rounded-bl-md'
-                  }`}
+                  } ${isSelected ? 'ring-2 ring-cyan-400' : ''}`}
                 >
-                  {isVoice ? (
+                  {isDeleted ? (
+                    <p className="text-sm italic opacity-60">This message was deleted</p>
+                  ) : isVoice ? (
                     <div className="flex items-center gap-3">
                       <button 
                         className="p-2 bg-white/20 rounded-full hover:bg-white/30 transition-colors"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation()
                           const audio = new Audio(msg.content)
                           audio.play()
                         }}
@@ -598,15 +738,41 @@ export default function Chat({ onUnreadCountChange }: ChatProps) {
                   ) : (
                     <p className="text-sm whitespace-pre-wrap break-words" dir="auto">{msg.content}</p>
                   )}
-                  <div className={`flex items-center gap-1 mt-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`flex items-center gap-1.5 mt-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
                     <span className="text-[10px] opacity-60">{formatTime(msg.created_at)}</span>
-                    {isMine && (
-                      <span className="text-[10px] opacity-60">
+                    {isMine && !isDeleted && (
+                      <span className={`text-[10px] ${msg.is_read ? 'text-cyan-300' : 'opacity-60'}`}>
                         {msg.is_read ? '✓✓' : '✓'}
                       </span>
                     )}
                   </div>
                 </div>
+
+                {/* Message Options Popup */}
+                {isSelected && !isDeleted && (
+                  <div className={`absolute ${isMine ? 'right-0' : 'left-0'} top-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden`}>
+                    <button
+                      onClick={() => handleDeleteMessage(msg.id, false)}
+                      className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      Delete for me
+                    </button>
+                    {isMine && (
+                      <button
+                        onClick={() => handleDeleteMessage(msg.id, true)}
+                        className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap border-t border-slate-700"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Delete for everyone
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })

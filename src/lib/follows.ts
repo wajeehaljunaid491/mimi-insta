@@ -102,3 +102,78 @@ export async function checkFollowStatus(targetUserId: string) {
     isFollower: !!followerResult.data
   }
 }
+// Remove a follower (someone who follows you)
+export async function removeFollower(userId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { error } = await supabase
+    .from('follows')
+    .delete()
+    .eq('follower_id', userId)
+    .eq('following_id', user.id)
+
+  return !error
+}
+
+// Block a user
+export async function blockUser(userId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  // First unfollow them and remove them as follower
+  await unfollowUser(userId)
+  await removeFollower(userId)
+
+  // Add to blocks table
+  const { error } = await supabase
+    .from('blocks')
+    .insert({ blocker_id: user.id, blocked_id: userId })
+
+  return !error
+}
+
+// Unblock a user
+export async function unblockUser(userId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { error } = await supabase
+    .from('blocks')
+    .delete()
+    .eq('blocker_id', user.id)
+    .eq('blocked_id', userId)
+
+  return !error
+}
+
+// Check if user is blocked
+export async function isUserBlocked(userId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { data } = await supabase
+    .from('blocks')
+    .select('id')
+    .eq('blocker_id', user.id)
+    .eq('blocked_id', userId)
+    .single()
+
+  return !!data
+}
+
+// Get blocked users list
+export async function getBlockedUsers() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const { data, error } = await supabase
+    .from('blocks')
+    .select(`
+      blocked:profiles!blocks_blocked_id_fkey(id, username, full_name, avatar_url)
+    `)
+    .eq('blocker_id', user.id)
+
+  if (error) return []
+  return data?.map((b: any) => b.blocked) || []
+}

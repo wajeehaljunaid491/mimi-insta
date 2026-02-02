@@ -165,21 +165,6 @@ export async function markMessagesAsRead(senderId: string): Promise<boolean> {
   return true
 }
 
-// Delete a message
-export async function deleteMessage(messageId: string): Promise<boolean> {
-  const { error } = await supabase
-    .from('messages')
-    .delete()
-    .eq('id', messageId)
-
-  if (error) {
-    console.error('Error deleting message:', error)
-    return false
-  }
-
-  return true
-}
-
 // Get unread message count
 export async function getUnreadCount(): Promise<number> {
   const { data: { user } } = await supabase.auth.getUser()
@@ -254,4 +239,44 @@ export function subscribeToMessages(
 // Unsubscribe from messages
 export function unsubscribeFromMessages(channel: RealtimeChannel) {
   supabase.removeChannel(channel)
+}
+// Delete message (for me only or for everyone)
+export async function deleteMessage(messageId: string, forEveryone: boolean = false): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  if (forEveryone) {
+    // Delete for everyone - update the message
+    const { error } = await supabase
+      .from('messages')
+      .update({ deleted_for_everyone: true, content: 'This message was deleted' })
+      .eq('id', messageId)
+      .eq('sender_id', user.id) // Only sender can delete for everyone
+
+    return !error
+  } else {
+    // Delete for me only - add to deletions table
+    const { error } = await supabase
+      .from('message_deletions')
+      .insert({ message_id: messageId, user_id: user.id })
+
+    return !error
+  }
+}
+
+// Delete entire chat
+export async function deleteChat(otherUserId: string): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  // Mark chat as deleted for this user
+  const { error } = await supabase
+    .from('chat_deletions')
+    .upsert({ 
+      user_id: user.id, 
+      other_user_id: otherUserId,
+      deleted_at: new Date().toISOString()
+    })
+
+  return !error
 }

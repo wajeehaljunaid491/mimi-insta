@@ -11,8 +11,10 @@ import CallHistory from '@/components/dashboard/CallHistory'
 import FollowedUsers from '@/components/dashboard/FollowedUsers'
 import CallOverlay from '@/components/call/CallOverlay'
 import Chat from '@/components/chat/Chat'
+import Settings from '@/components/settings/Settings'
+import Stories from '@/components/stories/Stories'
 
-type TabType = 'people' | 'messages' | 'history' | 'search'
+type TabType = 'people' | 'messages' | 'history' | 'search' | 'settings'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -20,6 +22,13 @@ export default function DashboardPage() {
   const { initializePresence } = usePresenceStore()
   const [activeTab, setActiveTab] = useState<TabType>('people')
   const [unreadMessages, setUnreadMessages] = useState(0)
+  const [openChatUserId, setOpenChatUserId] = useState<string | null>(null)
+
+  // Handle starting a chat with a specific user
+  const handleStartChat = (userId: string) => {
+    setOpenChatUserId(userId)
+    setActiveTab('messages')
+  }
 
   useEffect(() => {
     if (!loading && !user) {
@@ -82,6 +91,13 @@ export default function DashboardPage() {
 
       {/* Main Content */}
       <div className="max-w-lg mx-auto px-4 pb-24">
+        {/* Stories Section - Shows on people tab */}
+        {activeTab === 'people' && (
+          <div className="bg-slate-800/50 backdrop-blur border border-slate-700/30 rounded-2xl mb-4 overflow-hidden">
+            <Stories />
+          </div>
+        )}
+
         {/* Tab Content */}
         <div className="py-4">
           {activeTab === 'people' && (
@@ -92,7 +108,7 @@ export default function DashboardPage() {
                   <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-lg shadow-emerald-500/50"></div>
                   <h2 className="text-lg font-semibold text-white">Online Now</h2>
                 </div>
-                <OnlineUsers />
+                <OnlineUsers onStartChat={handleStartChat} />
               </div>
 
               {/* Following Section */}
@@ -103,7 +119,7 @@ export default function DashboardPage() {
                   </svg>
                   <h2 className="text-lg font-semibold text-white">People You Follow</h2>
                 </div>
-                <FollowedUsers />
+                <FollowedUsers onStartChat={handleStartChat} />
               </div>
             </div>
           )}
@@ -134,7 +150,17 @@ export default function DashboardPage() {
 
           {activeTab === 'messages' && (
             <div className="bg-slate-800/50 backdrop-blur border border-slate-700/30 rounded-2xl overflow-hidden" style={{ height: 'calc(100vh - 200px)' }}>
-              <Chat onUnreadCountChange={setUnreadMessages} />
+              <Chat 
+                onUnreadCountChange={setUnreadMessages} 
+                openUserId={openChatUserId}
+                onOpenUserIdHandled={() => setOpenChatUserId(null)}
+              />
+            </div>
+          )}
+
+          {activeTab === 'settings' && (
+            <div className="bg-slate-800/50 backdrop-blur border border-slate-700/30 rounded-2xl overflow-hidden" style={{ height: 'calc(100vh - 200px)' }}>
+              <Settings />
             </div>
           )}
         </div>
@@ -204,6 +230,21 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <span className="text-xs mt-1 font-medium">Search</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`flex flex-col items-center py-2 px-4 rounded-xl transition-all ${
+              activeTab === 'settings' 
+                ? 'text-cyan-400 bg-cyan-500/10' 
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <span className="text-xs mt-1 font-medium">Settings</span>
           </button>
         </div>
       </nav>

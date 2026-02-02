@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import { usePresenceStore } from '@/store/presenceStore'
-import { getFollowing, unfollowUser } from '@/lib/follows'
+import { getFollowing, unfollowUser, blockUser } from '@/lib/follows'
 import { initiateCall } from '@/lib/calls'
 
 interface FollowedUser {
@@ -15,7 +15,11 @@ interface FollowedUser {
   status: string
 }
 
-export default function FollowedUsers() {
+interface FollowedUsersProps {
+  onStartChat?: (userId: string) => void
+}
+
+export default function FollowedUsers({ onStartChat }: FollowedUsersProps) {
   const { user } = useAuthStore()
   const { onlineUsers } = usePresenceStore()
   const [following, setFollowing] = useState<FollowedUser[]>([])
@@ -23,12 +27,20 @@ export default function FollowedUsers() {
   const [showAll, setShowAll] = useState(false)
   const [unfollowingId, setUnfollowingId] = useState<string | null>(null)
   const [callingId, setCallingId] = useState<string | null>(null)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
 
   const INITIAL_DISPLAY = 5
 
   useEffect(() => {
     loadFollowing()
   }, [user])
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => setOpenMenuId(null)
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [])
 
   const loadFollowing = async () => {
     if (!user) return
@@ -39,14 +51,22 @@ export default function FollowedUsers() {
   }
 
   const handleUnfollow = async (userId: string) => {
-    if (!confirm('Are you sure you want to unfollow this person?')) return
-    
+    setOpenMenuId(null)
     setUnfollowingId(userId)
     const success = await unfollowUser(userId)
     if (success) {
       setFollowing(prev => prev.filter(u => u.id !== userId))
     }
     setUnfollowingId(null)
+  }
+
+  const handleBlock = async (userId: string) => {
+    if (!confirm('Block this user? They won\'t be able to see your profile or contact you.')) return
+    setOpenMenuId(null)
+    const success = await blockUser(userId)
+    if (success) {
+      setFollowing(prev => prev.filter(u => u.id !== userId))
+    }
   }
 
   const handleCall = async (userId: string, callType: 'voice' | 'video') => {
@@ -126,6 +146,17 @@ export default function FollowedUsers() {
 
           {/* Actions */}
           <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+            {/* Chat button */}
+            <button
+              onClick={() => onStartChat?.(person.id)}
+              className="p-2.5 rounded-full bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-all"
+              title="Send message"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </button>
+
             {/* Voice call */}
             <button
               onClick={() => handleCall(person.id, 'voice')}
@@ -158,21 +189,53 @@ export default function FollowedUsers() {
               </svg>
             </button>
 
-            {/* Unfollow */}
-            <button
-              onClick={() => handleUnfollow(person.id)}
-              disabled={unfollowingId === person.id}
-              className="p-2.5 rounded-full bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"
-              title="Unfollow"
-            >
-              {unfollowingId === person.id ? (
-                <div className="w-5 h-5 animate-spin rounded-full border-2 border-red-400 border-t-transparent"></div>
-              ) : (
+            {/* More Options Menu */}
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setOpenMenuId(openMenuId === person.id ? null : person.id)
+                }}
+                className="p-2.5 rounded-full bg-gray-700/50 text-gray-400 hover:bg-gray-700 transition-all"
+                title="More options"
+              >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7a4 4 0 11-8 0 4 4 0 018 0zM9 14a6 6 0 00-6 6v1h12v-1a6 6 0 00-6-6zM21 12h-6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                 </svg>
+              </button>
+
+              {/* Dropdown Menu */}
+              {openMenuId === person.id && (
+                <div 
+                  className="absolute right-0 top-full mt-1 w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => handleUnfollow(person.id)}
+                    disabled={unfollowingId === person.id}
+                    className="w-full px-4 py-3 text-left text-sm text-gray-300 hover:bg-slate-700/50 flex items-center gap-3 transition-colors"
+                  >
+                    {unfollowingId === person.id ? (
+                      <div className="w-4 h-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent"></div>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7a4 4 0 11-8 0 4 4 0 018 0zM9 14a6 6 0 00-6 6v1h12v-1a6 6 0 00-6-6zM21 12h-6" />
+                      </svg>
+                    )}
+                    Unfollow
+                  </button>
+                  <button
+                    onClick={() => handleBlock(person.id)}
+                    className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-slate-700/50 flex items-center gap-3 transition-colors border-t border-slate-700"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                    Block
+                  </button>
+                </div>
               )}
-            </button>
+            </div>
           </div>
         </div>
       ))}
