@@ -103,7 +103,12 @@ export async function getMyStories(): Promise<Story[]> {
 // Create a new story
 export async function createStory(mediaUrl: string, mediaType: 'image' | 'video', caption?: string): Promise<Story | null> {
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  if (!user) {
+    console.error('No user found for story creation')
+    return null
+  }
+
+  console.log('Creating story with:', { user_id: user.id, mediaUrl, mediaType })
 
   const { data, error } = await supabase
     .from('stories')
@@ -121,6 +126,7 @@ export async function createStory(mediaUrl: string, mediaType: 'image' | 'video'
     return null
   }
 
+  console.log('Story created successfully:', data)
   return data
 }
 
@@ -173,25 +179,34 @@ export async function getStoryViewers(storyId: string): Promise<StoryView[]> {
 // Upload story media
 export async function uploadStoryMedia(file: File): Promise<string | null> {
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  if (!user) {
+    console.error('No user found for story upload')
+    return null
+  }
 
   const fileExt = file.name.split('.').pop()
   const fileName = `${user.id}-${Date.now()}.${fileExt}`
-  const filePath = `stories/${fileName}`
+  const filePath = `${user.id}/${fileName}`
 
-  const { error } = await supabase.storage
-    .from('stories')
-    .upload(filePath, file)
+  // Upload to the 'avatars' bucket since 'stories' bucket might not exist
+  // You can create a 'stories' bucket in Supabase Storage if you want
+  const { error: uploadError, data: uploadData } = await supabase.storage
+    .from('avatars')
+    .upload(filePath, file, {
+      cacheControl: '3600',
+      upsert: false
+    })
 
-  if (error) {
-    console.error('Error uploading story:', error)
+  if (uploadError) {
+    console.error('Error uploading story media:', uploadError)
     return null
   }
 
   const { data } = supabase.storage
-    .from('stories')
+    .from('avatars')
     .getPublicUrl(filePath)
 
+  console.log('Story uploaded successfully:', data.publicUrl)
   return data.publicUrl
 }
 

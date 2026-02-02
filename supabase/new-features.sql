@@ -1,6 +1,7 @@
 -- =====================================================
 -- NEW FEATURES DATABASE SETUP
 -- Run this in Supabase SQL Editor
+-- Safe to run multiple times (uses DROP IF EXISTS)
 -- =====================================================
 
 -- 1. STORIES TABLE
@@ -23,10 +24,18 @@ CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at);
 -- RLS for stories
 ALTER TABLE stories ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view stories from people they follow or their own"
+-- Drop ALL existing policies first
+DROP POLICY IF EXISTS "Users can view stories from people they follow or their own" ON stories;
+DROP POLICY IF EXISTS "Users can view stories" ON stories;
+DROP POLICY IF EXISTS "Users can create their own stories" ON stories;
+DROP POLICY IF EXISTS "Users can delete their own stories" ON stories;
+
+-- Users can view their own stories OR stories from people they follow
+CREATE POLICY "Users can view stories"
 ON stories FOR SELECT
 USING (
-  user_id = auth.uid() OR
+  user_id = auth.uid() 
+  OR 
   user_id IN (
     SELECT following_id FROM follows WHERE follower_id = auth.uid()
   )
@@ -54,6 +63,10 @@ CREATE INDEX IF NOT EXISTS idx_story_views_story ON story_views(story_id);
 
 ALTER TABLE story_views ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies first
+DROP POLICY IF EXISTS "Story owner can view who watched" ON story_views;
+DROP POLICY IF EXISTS "Users can record their views" ON story_views;
+
 CREATE POLICY "Story owner can view who watched"
 ON story_views FOR SELECT
 USING (
@@ -78,6 +91,11 @@ CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks(blocker_id);
 CREATE INDEX IF NOT EXISTS idx_blocks_blocked ON blocks(blocked_id);
 
 ALTER TABLE blocks ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies first
+DROP POLICY IF EXISTS "Users can view their own blocks" ON blocks;
+DROP POLICY IF EXISTS "Users can block others" ON blocks;
+DROP POLICY IF EXISTS "Users can unblock" ON blocks;
 
 CREATE POLICY "Users can view their own blocks"
 ON blocks FOR SELECT
@@ -105,6 +123,10 @@ CREATE INDEX IF NOT EXISTS idx_message_deletions_user ON message_deletions(user_
 
 ALTER TABLE message_deletions ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies first
+DROP POLICY IF EXISTS "Users can see their deletions" ON message_deletions;
+DROP POLICY IF EXISTS "Users can delete messages for themselves" ON message_deletions;
+
 CREATE POLICY "Users can see their deletions"
 ON message_deletions FOR SELECT
 USING (user_id = auth.uid());
@@ -129,6 +151,9 @@ CREATE TABLE IF NOT EXISTS chat_deletions (
 
 ALTER TABLE chat_deletions ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies first
+DROP POLICY IF EXISTS "Users can manage their chat deletions" ON chat_deletions;
+
 CREATE POLICY "Users can manage their chat deletions"
 ON chat_deletions FOR ALL
 USING (user_id = auth.uid());
@@ -144,17 +169,37 @@ $$ LANGUAGE plpgsql;
 
 -- 8. UPDATE PROFILES TABLE FOR MORE SETTINGS
 -- =====================================================
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_private BOOLEAN DEFAULT FALSE;
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS show_online_status BOOLEAN DEFAULT TRUE;
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS allow_messages_from TEXT DEFAULT 'everyone' CHECK (allow_messages_from IN ('everyone', 'followers', 'nobody'));
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'profiles' AND column_name = 'is_private') THEN
+    ALTER TABLE profiles ADD COLUMN is_private BOOLEAN DEFAULT FALSE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'profiles' AND column_name = 'show_online_status') THEN
+    ALTER TABLE profiles ADD COLUMN show_online_status BOOLEAN DEFAULT TRUE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'profiles' AND column_name = 'allow_messages_from') THEN
+    ALTER TABLE profiles ADD COLUMN allow_messages_from TEXT DEFAULT 'everyone';
+  END IF;
+END $$;
 
--- 9. ENABLE REALTIME FOR NEW TABLES
+-- 9. ENABLE REALTIME FOR NEW TABLES (ignore errors if already added)
 -- =====================================================
-ALTER PUBLICATION supabase_realtime ADD TABLE stories;
-ALTER PUBLICATION supabase_realtime ADD TABLE story_views;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE stories;
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE story_views;
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
 
 -- =====================================================
--- RUN THIS AFTER CREATING TABLES
+-- DONE! All tables and policies created successfully.
 -- =====================================================
 -- To auto-delete expired stories, set up a cron job in Supabase:
 -- Go to Database > Extensions > Enable pg_cron

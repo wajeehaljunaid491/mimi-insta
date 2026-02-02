@@ -71,13 +71,14 @@ export default function Stories() {
     if (progressRef.current) clearInterval(progressRef.current)
     setProgress(0)
     
+    // 30 seconds total: 100% / 0.333% per interval * 100ms = 30000ms
     progressRef.current = setInterval(() => {
       setProgress(prev => {
         if (prev >= 100) {
           nextStory()
           return 0
         }
-        return prev + 2 // 5 seconds total (100/2 * 100ms = 5000ms)
+        return prev + 0.333 // 30 seconds total
       })
     }, 100)
   }

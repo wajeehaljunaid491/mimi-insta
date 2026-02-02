@@ -57,6 +57,12 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const activeChatRef = useRef<Conversation | null>(null)
+
+  // Keep activeChatRef in sync
+  useEffect(() => {
+    activeChatRef.current = activeChat
+  }, [activeChat])
 
   // Load conversations and followed users
   useEffect(() => {
@@ -118,10 +124,12 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
     channelRef.current = subscribeToMessages(
       user.id,
       (newMsg) => {
-        // Add to messages if in active chat
-        if (activeChat && (newMsg.sender_id === activeChat.user.id)) {
+        // Add to messages if in active chat (use ref for latest value)
+        const currentChat = activeChatRef.current
+        if (currentChat && (newMsg.sender_id === currentChat.user.id)) {
           setMessages(prev => [...prev, newMsg])
           markMessagesAsRead(newMsg.sender_id)
+          scrollToBottom()
         }
         // Update conversations list
         loadConversations()
@@ -134,7 +142,7 @@ export default function Chat({ onUnreadCountChange, openUserId, onOpenUserIdHand
         ))
       }
     )
-  }, [user, activeChat])
+  }, [user])
 
   const loadConversations = async () => {
     setLoading(true)
